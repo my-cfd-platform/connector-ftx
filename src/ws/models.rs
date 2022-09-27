@@ -6,7 +6,7 @@ use serde_with::{serde_as, TimestampSecondsWithFrac};
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub enum Channel {
+pub enum WsChannel {
     Orderbook(Symbol),
     Trades(Symbol),
     Ticker(Symbol),

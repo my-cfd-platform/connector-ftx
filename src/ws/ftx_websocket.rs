@@ -14,10 +14,10 @@ use tokio::time::Interval;
 
 use crate::ws::WsMessageType;
 
-use super::{Channel, EventData, WsError, Symbol, WsResponseData, WsResponse};
+use super::{WsChannel, EventData, WsError, Symbol, WsResponseData, WsResponse};
 
 pub struct FtxWebsocket {
-    channels: Vec<Channel>,
+    channels: Vec<WsChannel>,
     stream: WebSocketStream<MaybeTlsStream<TcpStream>>,
     buf: VecDeque<(Option<Symbol>, EventData)>,
     ping_timer: Interval,
@@ -81,9 +81,9 @@ impl FtxWebsocket {
         Ok(())
     }    
 
-    pub async fn subscribe(&mut self, channels: &[Channel]) -> Result<(), WsError> {
+    pub async fn subscribe(&mut self, channels: &[WsChannel]) -> Result<(), WsError> {
         for channel in channels.iter() {
-            if (channel == &Channel::Fills || channel == &Channel::Orders) && !self.is_authenticated
+            if (channel == &WsChannel::Fills || channel == &WsChannel::Orders) && !self.is_authenticated
             {
                 return Err(WsError::SocketNotAuthenticated);
             }
@@ -95,7 +95,7 @@ impl FtxWebsocket {
         Ok(())
     }
 
-    pub async fn unsubscribe(&mut self, channels: &[Channel]) -> Result<(), WsError> {
+    pub async fn unsubscribe(&mut self, channels: &[WsChannel]) -> Result<(), WsError> {
         for channel in channels.iter() {
             if !self.channels.contains(channel) {
                 return Err(WsError::NotSubscribedToThisChannel(channel.clone()));
@@ -119,7 +119,7 @@ impl FtxWebsocket {
 
     async fn subscribe_or_unsubscribe(
         &mut self,
-        channels: &[Channel],
+        channels: &[WsChannel],
         subscribe: bool,
     ) -> Result<(), WsError> {
         let op = if subscribe {
@@ -130,11 +130,11 @@ impl FtxWebsocket {
 
         'channels: for channel in channels {
             let (channel, symbol) = match channel {
-                Channel::Orderbook(symbol) => ("orderbook", symbol.as_str()),
-                Channel::Trades(symbol) => ("trades", symbol.as_str()),
-                Channel::Ticker(symbol) => ("ticker", symbol.as_str()),
-                Channel::Fills => ("fills", ""),
-                Channel::Orders => ("orders", ""),
+                WsChannel::Orderbook(symbol) => ("orderbook", symbol.as_str()),
+                WsChannel::Trades(symbol) => ("trades", symbol.as_str()),
+                WsChannel::Ticker(symbol) => ("ticker", symbol.as_str()),
+                WsChannel::Fills => ("fills", ""),
+                WsChannel::Orders => ("orders", ""),
             };
 
             self.stream

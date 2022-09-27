@@ -1,4 +1,4 @@
-use crate::ws::Channel;
+use crate::ws::WsChannel;
 use thiserror::Error;
 use tokio_tungstenite::tungstenite;
 
@@ -11,7 +11,7 @@ pub enum WsError {
     MissingPartial,
 
     #[error("Not subscribed to this channel {0:?}")]
-    NotSubscribedToThisChannel(Channel),
+    NotSubscribedToThisChannel(WsChannel),
 
     #[error("Missing subscription confirmation")]
     MissingSubscriptionConfirmation,
