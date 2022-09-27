@@ -14,12 +14,12 @@ use tokio::time::Interval;
 
 use crate::ws::WsMessageType;
 
-use super::{Channel, Data, Error, Symbol, WsResponseData, WsResponse};
+use super::{Channel, EventData, WsError, Symbol, WsResponseData, WsResponse};
 
 pub struct FtxWebsocket {
     channels: Vec<Channel>,
     stream: WebSocketStream<MaybeTlsStream<TcpStream>>,
-    buf: VecDeque<(Option<Symbol>, Data)>,
+    buf: VecDeque<(Option<Symbol>, EventData)>,
     ping_timer: Interval,
     is_authenticated: bool,
 }
@@ -31,7 +31,7 @@ impl FtxWebsocket {
         key: Option<String>,
         secret: Option<String>,
         subaccount: Option<String>,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, WsError> {
         let (mut stream, _) = connect_async(FtxWebsocket::ENDPOINT).await?;
         
         let is_authenticated = if let (Some(key), Some(secret)) = (key, secret) {
@@ -68,7 +68,7 @@ impl FtxWebsocket {
         })
     }
 
-    async fn ping(&mut self) -> Result<(), Error> {
+    async fn ping(&mut self) -> Result<(), WsError> {
         self.stream
             .send(Message::Text(
                 json!({
@@ -81,12 +81,11 @@ impl FtxWebsocket {
         Ok(())
     }    
 
-    pub async fn subscribe(&mut self, channels: &[Channel]) -> Result<(), Error> {
+    pub async fn subscribe(&mut self, channels: &[Channel]) -> Result<(), WsError> {
         for channel in channels.iter() {
-            // Subscribing to fills or orders requires us to be authenticated via an API key
             if (channel == &Channel::Fills || channel == &Channel::Orders) && !self.is_authenticated
             {
-                return Err(Error::SocketNotAuthenticated);
+                return Err(WsError::SocketNotAuthenticated);
             }
             self.channels.push(channel.clone());
         }
@@ -96,11 +95,10 @@ impl FtxWebsocket {
         Ok(())
     }
 
-    pub async fn unsubscribe(&mut self, channels: &[Channel]) -> Result<(), Error> {
-        // Check that the specified channels match an existing one
+    pub async fn unsubscribe(&mut self, channels: &[Channel]) -> Result<(), WsError> {
         for channel in channels.iter() {
             if !self.channels.contains(channel) {
-                return Err(Error::NotSubscribedToThisChannel(channel.clone()));
+                return Err(WsError::NotSubscribedToThisChannel(channel.clone()));
             }
         }
 
@@ -110,7 +108,7 @@ impl FtxWebsocket {
         Ok(())
     }
 
-    pub async fn unsubscribe_all(&mut self) -> Result<(), Error> {
+    pub async fn unsubscribe_all(&mut self) -> Result<(), WsError> {
         let channels = self.channels.clone();
         self.unsubscribe(&channels).await?;
 
@@ -123,7 +121,7 @@ impl FtxWebsocket {
         &mut self,
         channels: &[Channel],
         subscribe: bool,
-    ) -> Result<(), Error> {
+    ) -> Result<(), WsError> {
         let op = if subscribe {
             "subscribe"
         } else {
@@ -158,30 +156,27 @@ impl FtxWebsocket {
                         r#type: WsMessageType::Subscribed,
                         ..
                     } if subscribe => {
-                        // Subscribe confirmed
                         continue 'channels;
                     }
                     WsResponse {
                         r#type: WsMessageType::Unsubscribed,
                         ..
                     } if !subscribe => {
-                        // Unsubscribe confirmed
                         continue 'channels;
                     }
                     _ => {
-                        // Otherwise, continue adding contents to buffer
                         self.add_to_buffer(response);
                     }
                 }
             }
 
-            return Err(Error::MissingSubscriptionConfirmation);
+            return Err(WsError::MissingSubscriptionConfirmation);
         }
 
         Ok(())
     }
 
-    async fn next_response(&mut self) -> Result<WsResponse, Error> {
+    async fn next_response(&mut self) -> Result<WsResponse, WsError> {
         loop {
             tokio::select! {
                 _ = self.ping_timer.tick() => {
@@ -209,23 +204,54 @@ impl FtxWebsocket {
                 WsResponseData::Trades(trades) => {
                     for trade in trades {
                         self.buf
-                            .push_back((response.market.clone(), Data::Trade(trade)));
+                            .push_back((response.market.clone(), EventData::Trade(trade)));
                     }
                 }
                 WsResponseData::OrderbookData(orderbook) => {
                     self.buf
-                        .push_back((response.market, Data::OrderbookData(orderbook)));
+                        .push_back((response.market, EventData::OrderbookData(orderbook)));
                 }
                 WsResponseData::Fill(fill) => {
-                    self.buf.push_back((response.market, Data::Fill(fill)));
+                    self.buf.push_back((response.market, EventData::Fill(fill)));
                 }
                 WsResponseData::Ticker(ticker) => {
-                    self.buf.push_back((response.market, Data::Ticker(ticker)));
+                    self.buf.push_back((response.market, EventData::Ticker(ticker)));
                 }
                 WsResponseData::Order(order) => {
-                    self.buf.push_back((response.market, Data::Order(order)));
+                    self.buf.push_back((response.market, EventData::Order(order)));
                 }
             }
         }
+    }
+}
+
+impl Stream for FtxWebsocket {
+    type Item = Result<(Option<Symbol>, EventData), WsError>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        loop {
+            if let Some(data) = self.buf.pop_front() {
+                return Poll::Ready(Some(Ok(data)));
+            }
+            let response = {
+                // Fetch new response if buffer is empty.
+                // safety: this is ok because the future from self.next_response() will only live in this function.
+                // It won't be moved anymore.
+                let mut next_response = self.next_response();
+                let pinned = unsafe { Pin::new_unchecked(&mut next_response) };
+                match ready!(pinned.poll(cx)) {
+                    Ok(response) => response,
+                    Err(e) => {
+                        return Poll::Ready(Some(Err(e)));
+                    }
+                }
+            };
+
+            self.add_to_buffer(response);
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.buf.len(), None)
     }
 }

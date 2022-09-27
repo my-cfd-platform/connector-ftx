@@ -49,7 +49,7 @@ pub enum WsResponseData {
 
 /// Represents the data we return to the user
 #[derive(Clone, Debug, Serialize)]
-pub enum Data {
+pub enum EventData {
     Ticker(Ticker),
     Trade(Trade),
     OrderbookData(WsOrderbookData),
@@ -98,8 +98,6 @@ pub struct Fill {
 #[serde(rename_all = "camelCase")]
 pub struct WsOrderbookData {
     pub action: WsOrderbookAction,
-    // Note that bids and asks are returned in 'best' order,
-    // i.e. highest to lowest bids, lowest to highest asks
     pub bids: Vec<(Decimal, Decimal)>,
     pub asks: Vec<(Decimal, Decimal)>,
     pub checksum: Checksum,

@@ -3,7 +3,7 @@ use thiserror::Error;
 use tokio_tungstenite::tungstenite;
 
 #[derive(Debug, Error)]
-pub enum Error {
+pub enum WsError {
     #[error("Orderbook checksum was not correct")]
     IncorrectChecksum,
 
