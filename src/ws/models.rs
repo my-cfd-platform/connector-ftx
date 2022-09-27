@@ -16,15 +16,15 @@ pub enum Channel {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Response {
+pub struct WsResponse {
     pub market: Option<Symbol>,
-    pub r#type: Type,
-    pub data: Option<ResponseData>,
+    pub r#type: WsMessageType,
+    pub data: Option<WsResponseData>,
 }
 
 #[derive(Copy, Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub enum Type {
+pub enum WsMessageType {
     Subscribed,
     Unsubscribed,
     Update,
@@ -39,10 +39,10 @@ pub enum Type {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[serde(untagged)]
-pub enum ResponseData {
+pub enum WsResponseData {
     Ticker(Ticker),
     Trades(Vec<Trade>),
-    OrderbookData(OrderbookData),
+    OrderbookData(WsOrderbookData),
     Fill(Fill),
     Order(OrderInfo),
 }
@@ -52,7 +52,7 @@ pub enum ResponseData {
 pub enum Data {
     Ticker(Ticker),
     Trade(Trade),
-    OrderbookData(OrderbookData),
+    OrderbookData(WsOrderbookData),
     Fill(Fill),
     Order(OrderInfo),
 }
@@ -96,8 +96,8 @@ pub struct Fill {
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct OrderbookData {
-    pub action: OrderbookAction,
+pub struct WsOrderbookData {
+    pub action: WsOrderbookAction,
     // Note that bids and asks are returned in 'best' order,
     // i.e. highest to lowest bids, lowest to highest asks
     pub bids: Vec<(Decimal, Decimal)>,
@@ -111,7 +111,7 @@ type Checksum = u32;
 
 #[derive(Copy, Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub enum OrderbookAction {
+pub enum WsOrderbookAction {
     /// Initial snapshot of the orderbook
     Partial,
     /// Updates to the orderbook
