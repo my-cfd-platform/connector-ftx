@@ -135,7 +135,7 @@ pub struct OrderInfo {
 
 #[derive(Copy, Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Trade {
+pub struct TradeInfo {
     pub id: Id,
     pub liquidation: bool,
     pub price: Decimal,

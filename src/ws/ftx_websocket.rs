@@ -233,8 +233,9 @@ impl Stream for FtxWebsocket {
             if let Some(data) = self.buf.pop_front() {
                 return Poll::Ready(Some(Ok(data)));
             }
+            
+            // Fetch new response if buffer is empty
             let response = {
-                // Fetch new response if buffer is empty.
                 // safety: this is ok because the future from self.next_response() will only live in this function.
                 // It won't be moved anymore.
                 let mut next_response = self.next_response();

@@ -1,4 +1,4 @@
-pub use crate::common::{Coin, Id, MarketType, OrderInfo, Side, Symbol, Trade};
+pub use crate::common::{Coin, Id, MarketType, OrderInfo, Side, Symbol, TradeInfo};
 use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -40,27 +40,27 @@ pub enum WsMessageType {
 #[serde(rename_all = "camelCase")]
 #[serde(untagged)]
 pub enum WsResponseData {
-    Ticker(Ticker),
-    Trades(Vec<Trade>),
-    OrderbookData(WsOrderbookData),
-    Fill(Fill),
+    Ticker(TickerInfo),
+    Trades(Vec<TradeInfo>),
+    OrderbookData(OrderbookInfo),
+    Fill(FillInfo),
     Order(OrderInfo),
 }
 
 /// Represents the data we return to the user
 #[derive(Clone, Debug, Serialize)]
 pub enum EventData {
-    Ticker(Ticker),
-    Trade(Trade),
-    OrderbookData(WsOrderbookData),
-    Fill(Fill),
+    Ticker(TickerInfo),
+    Trade(TradeInfo),
+    OrderbookData(OrderbookInfo),
+    Fill(FillInfo),
     Order(OrderInfo),
 }
 
 #[serde_as]
 #[derive(Copy, Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Ticker {
+pub struct TickerInfo {
     pub bid: Decimal,
     pub ask: Decimal,
     pub bid_size: Decimal,
@@ -72,7 +72,7 @@ pub struct Ticker {
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Fill {
+pub struct FillInfo {
     pub id: Id,
     pub market: Option<Symbol>,
     pub future: Option<Symbol>,
@@ -96,7 +96,7 @@ pub struct Fill {
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct WsOrderbookData {
+pub struct OrderbookInfo {
     pub action: WsOrderbookAction,
     pub bids: Vec<(Decimal, Decimal)>,
     pub asks: Vec<(Decimal, Decimal)>,
