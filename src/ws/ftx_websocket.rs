@@ -5,16 +5,18 @@ use futures::{
 };
 use hmac_sha256::HMAC;
 use serde_json::json;
-use std::collections::VecDeque;
+use std::{collections::VecDeque, sync::Arc};
 use std::pin::Pin;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tokio::time::Interval;
 use tokio::{net::TcpStream, time};
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
-use tokio::time::Interval;
 
 use crate::ws::WsMessageType;
 
-use super::{WsChannel, EventData, WsError, Symbol, WsResponseData, WsResponse};
+use super::error::*;
+use super::event_handler::*;
+use super::models::*;
 
 pub struct FtxWebsocket {
     channels: Vec<WsChannel>,
@@ -22,6 +24,7 @@ pub struct FtxWebsocket {
     buf: VecDeque<(Option<Symbol>, EventData)>,
     ping_timer: Interval,
     is_authenticated: bool,
+    event_handler: Option<Arc<dyn EventHandler + Send + Sync + 'static>>,
 }
 
 impl FtxWebsocket {
@@ -33,7 +36,7 @@ impl FtxWebsocket {
         subaccount: Option<String>,
     ) -> Result<Self, WsError> {
         let (mut stream, _) = connect_async(FtxWebsocket::ENDPOINT).await?;
-        
+
         let is_authenticated = if let (Some(key), Some(secret)) = (key, secret) {
             let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
             let sign_payload = format!("{}websocket_login", timestamp);
@@ -65,7 +68,13 @@ impl FtxWebsocket {
             buf: VecDeque::new(),
             ping_timer: time::interval(Duration::from_secs(15)),
             is_authenticated,
+            event_handler: None,
         })
+    }
+
+    pub fn add_event_handler<H>(&mut self, handler: Arc<dyn EventHandler + Send + Sync + 'static>)
+    {
+        self.event_handler = Some(handler);
     }
 
     async fn ping(&mut self) -> Result<(), WsError> {
@@ -79,11 +88,12 @@ impl FtxWebsocket {
             .await?;
 
         Ok(())
-    }    
+    }
 
     pub async fn subscribe(&mut self, channels: &[WsChannel]) -> Result<(), WsError> {
         for channel in channels.iter() {
-            if (channel == &WsChannel::Fills || channel == &WsChannel::Orders) && !self.is_authenticated
+            if (channel == &WsChannel::Fills || channel == &WsChannel::Orders)
+                && !self.is_authenticated
             {
                 return Err(WsError::SocketNotAuthenticated);
             }
@@ -215,12 +225,28 @@ impl FtxWebsocket {
                     self.buf.push_back((response.market, EventData::Fill(fill)));
                 }
                 WsResponseData::Ticker(ticker) => {
-                    self.buf.push_back((response.market, EventData::Ticker(ticker)));
+                    self.buf
+                        .push_back((response.market, EventData::Ticker(ticker)));
                 }
                 WsResponseData::Order(order) => {
-                    self.buf.push_back((response.market, EventData::Order(order)));
+                    self.buf
+                        .push_back((response.market, EventData::Order(order)));
                 }
             }
+        }
+    }
+
+    pub fn run(self) {
+        tokio::spawn(event_loop(self));
+    }
+}
+
+async fn event_loop(mut ws: FtxWebsocket) {
+    loop {
+        let (symbol, event) = ws.next().await.expect("No data received").unwrap();
+
+        if let Some(ref handler) = ws.event_handler {
+            handler.on_event(event, symbol);
         }
     }
 }
@@ -233,7 +259,7 @@ impl Stream for FtxWebsocket {
             if let Some(data) = self.buf.pop_front() {
                 return Poll::Ready(Some(Ok(data)));
             }
-            
+
             // Fetch new response if buffer is empty
             let response = {
                 // safety: this is ok because the future from self.next_response() will only live in this function.

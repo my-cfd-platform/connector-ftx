@@ -47,16 +47,6 @@ pub enum WsResponseData {
     Order(OrderInfo),
 }
 
-/// Represents the data we return to the user
-#[derive(Clone, Debug, Serialize)]
-pub enum EventData {
-    Ticker(TickerInfo),
-    Trade(TradeInfo),
-    OrderbookData(OrderbookInfo),
-    Fill(FillInfo),
-    Order(OrderInfo),
-}
-
 #[serde_as]
 #[derive(Copy, Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
