@@ -3,82 +3,88 @@ use futures::{
     task::{Context, Poll},
     Future, SinkExt, Stream, StreamExt,
 };
-use hmac_sha256::HMAC;
 use serde_json::json;
-use std::{collections::VecDeque, sync::Arc};
 use std::pin::Pin;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
+use std::{collections::VecDeque, sync::Arc};
 use tokio::time::Interval;
 use tokio::{net::TcpStream, time};
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
-use crate::ws::WsMessageType;
+use crate::{ftx_auth_settings::FtxAuthSettings, ws::WsMessageType};
 
 use super::error::*;
 use super::event_handler::*;
 use super::models::*;
 
-pub struct FtxWebsocket {
+pub struct FtxWsClient {
     channels: Vec<WsChannel>,
-    stream: WebSocketStream<MaybeTlsStream<TcpStream>>,
+    stream: Option<WebSocketStream<MaybeTlsStream<TcpStream>>>,
     buf: VecDeque<(Option<Symbol>, EventData)>,
     ping_timer: Interval,
+    event_handler: Arc<dyn EventHandler + Send + Sync + 'static>,
+    auth_settings: Option<FtxAuthSettings>,
     is_authenticated: bool,
-    event_handler: Option<Arc<dyn EventHandler + Send + Sync + 'static>>,
 }
 
-impl FtxWebsocket {
+impl FtxWsClient {
     pub const ENDPOINT: &'static str = "wss://ftx.com/ws";
 
-    pub async fn connect(
-        key: Option<String>,
-        secret: Option<String>,
-        subaccount: Option<String>,
-    ) -> Result<Self, WsError> {
-        let (mut stream, _) = connect_async(FtxWebsocket::ENDPOINT).await?;
-
-        let is_authenticated = if let (Some(key), Some(secret)) = (key, secret) {
-            let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
-            let sign_payload = format!("{}websocket_login", timestamp);
-            let sign = HMAC::mac(sign_payload.as_bytes(), secret.as_bytes());
-            let sign = hex::encode(sign);
-
-            stream
-                .send(Message::Text(
-                    json!({
-                        "op": "login",
-                        "args": {
-                            "key": key,
-                            "sign": sign,
-                            "time": timestamp as u64,
-                            "subaccount": subaccount,
-                        }
-                    })
-                    .to_string(),
-                ))
-                .await?;
-            true
-        } else {
-            false
-        };
-
-        Ok(Self {
+    pub fn new(
+        event_handler: Arc<dyn EventHandler + Send + Sync + 'static>,
+        auth_settings: Option<FtxAuthSettings>,
+    ) -> Self {
+        Self {
             channels: Vec::new(),
-            stream,
+            stream: None,
             buf: VecDeque::new(),
             ping_timer: time::interval(Duration::from_secs(15)),
-            is_authenticated,
-            event_handler: None,
-        })
+            is_authenticated: false,
+            event_handler,
+            auth_settings,
+        }
     }
 
-    pub fn add_event_handler(&mut self, handler: Arc<dyn EventHandler + Send + Sync + 'static>)
-    {
-        self.event_handler = Some(handler);
+    pub async fn connect(&mut self) -> Result<(), WsError> {
+        let (stream, _) = connect_async(FtxWsClient::ENDPOINT).await?;
+        self.stream = Some(stream);
+
+        if let Some(_) = self.auth_settings {
+            self.authenticate().await;
+            self.is_authenticated = true;
+        }
+
+        Ok(())
+    }
+
+    async fn authenticate(&mut self) {
+        let timestamp = FtxAuthSettings::generate_timestamp();
+        let auth_settings = self.auth_settings.as_ref().unwrap();
+        let sign = auth_settings.generate_sign("websocket_login", timestamp);
+
+        self.stream
+            .as_mut()
+            .unwrap()
+            .send(Message::Text(
+                json!({
+                    "op": "login",
+                    "args": {
+                        "key": auth_settings.api_key,
+                        "sign": sign,
+                        "time": timestamp as u64,
+                        "subaccount": auth_settings.subaccount,
+                    }
+                })
+                .to_string(),
+            ))
+            .await
+            .unwrap();
     }
 
     async fn ping(&mut self) -> Result<(), WsError> {
         self.stream
+            .as_mut()
+            .unwrap()
             .send(Message::Text(
                 json!({
                     "op": "ping",
@@ -148,6 +154,8 @@ impl FtxWebsocket {
             };
 
             self.stream
+                .as_mut()
+                .unwrap()
                 .send(Message::Text(
                     json!({
                         "op": op,
@@ -192,7 +200,7 @@ impl FtxWebsocket {
                 _ = self.ping_timer.tick() => {
                     self.ping().await?;
                 },
-                Some(msg) = self.stream.next() => {
+                Some(msg) = self.stream.as_mut().unwrap().next() => {
                     let msg = msg?;
                     if let Message::Text(text) = msg {
                         let response: WsResponse = serde_json::from_str(&text)?;
@@ -236,22 +244,20 @@ impl FtxWebsocket {
         }
     }
 
-    pub fn run(self) {
+    pub fn start(self) {
         tokio::spawn(event_loop(self));
     }
 }
 
-async fn event_loop(mut ws: FtxWebsocket) {
+async fn event_loop(mut ws: FtxWsClient) {
     loop {
         let (symbol, event) = ws.next().await.expect("No data received").unwrap();
 
-        if let Some(ref handler) = ws.event_handler {
-            handler.on_event(event, symbol);
-        }
+        ws.event_handler.on_event(event, symbol);
     }
 }
 
-impl Stream for FtxWebsocket {
+impl Stream for FtxWsClient {
     type Item = Result<(Option<Symbol>, EventData), WsError>;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
