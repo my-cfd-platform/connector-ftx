@@ -1,16 +1,19 @@
-use serde::Serialize;
-
 use super::models::*;
 
 pub trait EventHandler {
-    fn on_event(&self, event: EventData, symbol: Option<Symbol>);
+    fn on_data(&self, event: WsDataEvent);
 }
 
-#[derive(Clone, Debug, Serialize)]
-pub enum EventData {
-    Ticker(TickerInfo),
-    Trade(TradeInfo),
-    OrderbookData(OrderbookInfo),
-    Fill(FillInfo),
-    Order(OrderInfo),
+pub struct WsDataEvent {
+    pub data: WsResponseData,
+    pub market: Option<Symbol>,
+}
+
+impl WsDataEvent {
+    pub fn new(resp: WsResponse) -> Self {
+        Self {
+            data: resp.data.unwrap(),
+            market: resp.market,
+        }
+    }
 }

@@ -1,12 +1,9 @@
 use futures::{
-    ready,
-    task::{Context, Poll},
-    Future, SinkExt, Stream, StreamExt,
+    SinkExt, StreamExt,
 };
 use serde_json::json;
-use std::pin::Pin;
 use std::time::Duration;
-use std::{collections::VecDeque, sync::Arc};
+use std::{sync::Arc};
 use tokio::time::Interval;
 use tokio::{net::TcpStream, time};
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
@@ -20,7 +17,6 @@ use super::models::*;
 pub struct FtxWsClient {
     channels: Vec<WsChannel>,
     stream: Option<WebSocketStream<MaybeTlsStream<TcpStream>>>,
-    buf: VecDeque<(Option<Symbol>, EventData)>,
     ping_timer: Interval,
     event_handler: Arc<dyn EventHandler + Send + Sync + 'static>,
     auth_settings: Option<FtxAuthSettings>,
@@ -37,7 +33,6 @@ impl FtxWsClient {
         Self {
             channels: Vec::new(),
             stream: None,
-            buf: VecDeque::new(),
             ping_timer: time::interval(Duration::from_secs(15)),
             is_authenticated: false,
             event_handler,
@@ -183,7 +178,7 @@ impl FtxWsClient {
                         continue 'channels;
                     }
                     _ => {
-                        self.add_to_buffer(response);
+                        self.event_handler.on_data(WsDataEvent::new(response));
                     }
                 }
             }
@@ -216,34 +211,6 @@ impl FtxWsClient {
         }
     }
 
-    fn add_to_buffer(&mut self, response: WsResponse) {
-        if let Some(data) = response.data {
-            match data {
-                WsResponseData::Trades(trades) => {
-                    for trade in trades {
-                        self.buf
-                            .push_back((response.market.clone(), EventData::Trade(trade)));
-                    }
-                }
-                WsResponseData::OrderbookData(orderbook) => {
-                    self.buf
-                        .push_back((response.market, EventData::OrderbookData(orderbook)));
-                }
-                WsResponseData::Fill(fill) => {
-                    self.buf.push_back((response.market, EventData::Fill(fill)));
-                }
-                WsResponseData::Ticker(ticker) => {
-                    self.buf
-                        .push_back((response.market, EventData::Ticker(ticker)));
-                }
-                WsResponseData::Order(order) => {
-                    self.buf
-                        .push_back((response.market, EventData::Order(order)));
-                }
-            }
-        }
-    }
-
     pub fn start(self) {
         tokio::spawn(event_loop(self));
     }
@@ -251,40 +218,8 @@ impl FtxWsClient {
 
 async fn event_loop(mut ws: FtxWsClient) {
     loop {
-        let (symbol, event) = ws.next().await.expect("No data received").unwrap();
+        let resp = ws.next_response().await.expect("No data received");
 
-        ws.event_handler.on_event(event, symbol);
-    }
-}
-
-impl Stream for FtxWsClient {
-    type Item = Result<(Option<Symbol>, EventData), WsError>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        loop {
-            if let Some(data) = self.buf.pop_front() {
-                return Poll::Ready(Some(Ok(data)));
-            }
-
-            // Fetch new response if buffer is empty
-            let response = {
-                // safety: this is ok because the future from self.next_response() will only live in this function.
-                // It won't be moved anymore.
-                let mut next_response = self.next_response();
-                let pinned = unsafe { Pin::new_unchecked(&mut next_response) };
-                match ready!(pinned.poll(cx)) {
-                    Ok(response) => response,
-                    Err(e) => {
-                        return Poll::Ready(Some(Err(e)));
-                    }
-                }
-            };
-
-            self.add_to_buffer(response);
-        }
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (self.buf.len(), None)
+        ws.event_handler.on_data(WsDataEvent::new(resp));
     }
 }
