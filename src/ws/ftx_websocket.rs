@@ -72,7 +72,7 @@ impl FtxWebsocket {
         })
     }
 
-    pub fn add_event_handler<H>(&mut self, handler: Arc<dyn EventHandler + Send + Sync + 'static>)
+    pub fn add_event_handler(&mut self, handler: Arc<dyn EventHandler + Send + Sync + 'static>)
     {
         self.event_handler = Some(handler);
     }
