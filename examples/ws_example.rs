@@ -22,16 +22,11 @@ impl EventHandler for OrderBookHandler {
 
 #[tokio::main]
 async fn main() {
-    let mut ftx_ws = FtxWsClient::new(Arc::new(OrderBookHandler::new()), None);
-    ftx_ws.connect().await.unwrap();
-    ftx_ws
-        .subscribe(&[
-            WsChannel::Orderbook("BTC/USD".to_owned()),
-            WsChannel::Orderbook("ETH/USD".to_owned())
-            ])
-        .await
-        .unwrap();
-    ftx_ws.start();
+    let ftx_ws = FtxWsClient::new(Arc::new(OrderBookHandler::new()), None);
+    ftx_ws.start(vec!(
+        WsChannel::Orderbook("BTC/USD".to_owned()),
+        WsChannel::Orderbook("ETH/USD".to_owned())
+        ));
 
     loop {
         tokio::time::sleep(Duration::from_secs(1)).await;

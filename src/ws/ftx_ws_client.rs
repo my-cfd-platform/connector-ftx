@@ -1,9 +1,7 @@
-use futures::{
-    SinkExt, StreamExt,
-};
+use futures::{SinkExt, StreamExt};
 use serde_json::json;
+use std::sync::Arc;
 use std::time::Duration;
-use std::{sync::Arc};
 use tokio::time::Interval;
 use tokio::{net::TcpStream, time};
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
@@ -15,12 +13,12 @@ use super::event_handler::*;
 use super::models::*;
 
 pub struct FtxWsClient {
-    channels: Vec<WsChannel>,
     stream: Option<WebSocketStream<MaybeTlsStream<TcpStream>>>,
     ping_timer: Interval,
     event_handler: Arc<dyn EventHandler + Send + Sync + 'static>,
     auth_settings: Option<FtxAuthSettings>,
     is_authenticated: bool,
+    connect_timeout: Duration,
 }
 
 impl FtxWsClient {
@@ -31,16 +29,16 @@ impl FtxWsClient {
         auth_settings: Option<FtxAuthSettings>,
     ) -> Self {
         Self {
-            channels: Vec::new(),
             stream: None,
             ping_timer: time::interval(Duration::from_secs(15)),
             is_authenticated: false,
             event_handler,
             auth_settings,
+            connect_timeout: Duration::from_secs(15),
         }
     }
 
-    pub async fn connect(&mut self) -> Result<(), WsError> {
+    async fn connect(&mut self) -> Result<(), WsError> {
         let (stream, _) = connect_async(FtxWsClient::ENDPOINT).await?;
         self.stream = Some(stream);
 
@@ -50,6 +48,13 @@ impl FtxWsClient {
         }
 
         Ok(())
+    }
+
+    fn is_connected(&self) -> bool {
+        match self.stream {
+            Some(_) => true,
+            None => false,
+        }
     }
 
     async fn authenticate(&mut self) {
@@ -87,43 +92,6 @@ impl FtxWsClient {
                 .to_string(),
             ))
             .await?;
-
-        Ok(())
-    }
-
-    pub async fn subscribe(&mut self, channels: &[WsChannel]) -> Result<(), WsError> {
-        for channel in channels.iter() {
-            if (channel == &WsChannel::Fills || channel == &WsChannel::Orders)
-                && !self.is_authenticated
-            {
-                return Err(WsError::SocketNotAuthenticated);
-            }
-            self.channels.push(channel.clone());
-        }
-
-        self.subscribe_or_unsubscribe(channels, true).await?;
-
-        Ok(())
-    }
-
-    pub async fn unsubscribe(&mut self, channels: &[WsChannel]) -> Result<(), WsError> {
-        for channel in channels.iter() {
-            if !self.channels.contains(channel) {
-                return Err(WsError::NotSubscribedToThisChannel(channel.clone()));
-            }
-        }
-
-        self.subscribe_or_unsubscribe(channels, false).await?;
-        self.channels.retain(|c| !channels.contains(c));
-
-        Ok(())
-    }
-
-    pub async fn unsubscribe_all(&mut self) -> Result<(), WsError> {
-        let channels = self.channels.clone();
-        self.unsubscribe(&channels).await?;
-
-        self.channels.clear();
 
         Ok(())
     }
@@ -191,6 +159,11 @@ impl FtxWsClient {
 
     async fn next_response(&mut self) -> Result<WsResponse, WsError> {
         loop {
+
+            if let None = self.stream {
+                return Err(WsError::Disconnected);
+            }
+
             tokio::select! {
                 _ = self.ping_timer.tick() => {
                     self.ping().await?;
@@ -211,15 +184,29 @@ impl FtxWsClient {
         }
     }
 
-    pub fn start(self) {
-        tokio::spawn(event_loop(self));
+    pub fn start(self, channels: Vec<WsChannel>) {
+        tokio::spawn(event_loop(self, channels));
     }
 }
 
-async fn event_loop(mut ws: FtxWsClient) {
+async fn event_loop(mut ws: FtxWsClient, channels: Vec<WsChannel>) {
     loop {
-        let resp = ws.next_response().await.expect("No data received");
+        if ws.is_connected() {
+            let resp = ws.next_response().await;
 
-        ws.event_handler.on_data(WsDataEvent::new(resp));
+            if let Ok(resp) = resp {
+                ws.event_handler.on_data(WsDataEvent::new(resp));
+                continue;
+            }
+        }
+
+        let connect_result = ws.connect().await;
+
+        match connect_result {
+            Err(_) => tokio::time::sleep(ws.connect_timeout).await,
+            Ok(_) => {
+                ws.subscribe_or_unsubscribe(&channels, true).await.unwrap()
+            },
+        }
     }
 }

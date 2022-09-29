@@ -27,4 +27,7 @@ pub enum WsError {
 
     #[error(transparent)]
     SystemTime(#[from] std::time::SystemTimeError),
+
+    #[error("Disconnected")]
+    Disconnected,
 }
