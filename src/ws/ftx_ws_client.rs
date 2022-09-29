@@ -43,9 +43,12 @@ impl FtxWsClient {
         self.stream = Some(stream);
 
         if let Some(_) = self.auth_settings {
-            self.authenticate().await;
+            self.authenticate().await?;
             self.is_authenticated = true;
         }
+
+
+        self.event_handler.on_connect();
 
         Ok(())
     }
@@ -57,7 +60,7 @@ impl FtxWsClient {
         }
     }
 
-    async fn authenticate(&mut self) {
+    async fn authenticate(&mut self) -> Result<(), WsError> {
         let timestamp = FtxAuthSettings::generate_timestamp();
         let auth_settings = self.auth_settings.as_ref().unwrap();
         let sign = auth_settings.generate_sign("websocket_login", timestamp);
@@ -77,8 +80,11 @@ impl FtxWsClient {
                 })
                 .to_string(),
             ))
-            .await
-            .unwrap();
+            .await?;
+
+        self.event_handler.on_auth();
+
+        Ok(())
     }
 
     async fn ping(&mut self) -> Result<(), WsError> {
@@ -137,6 +143,7 @@ impl FtxWsClient {
                         r#type: WsMessageType::Subscribed,
                         ..
                     } if subscribe => {
+                        self.event_handler.on_subscribed(channel, symbol);
                         continue 'channels;
                     }
                     WsResponse {
@@ -146,7 +153,7 @@ impl FtxWsClient {
                         continue 'channels;
                     }
                     _ => {
-                        self.event_handler.on_data(WsDataEvent::new(response));
+                        self.event_handler.on_data(WsDataEvent::new(response)).await;
                     }
                 }
             }
@@ -159,7 +166,6 @@ impl FtxWsClient {
 
     async fn next_response(&mut self) -> Result<WsResponse, WsError> {
         loop {
-
             if let None = self.stream {
                 return Err(WsError::Disconnected);
             }
@@ -194,19 +200,23 @@ async fn event_loop(mut ws: FtxWsClient, channels: Vec<WsChannel>) {
         if ws.is_connected() {
             let resp = ws.next_response().await;
 
-            if let Ok(resp) = resp {
-                ws.event_handler.on_data(WsDataEvent::new(resp));
-                continue;
+            match resp {
+                Err(err) => ws.event_handler.on_error(err),
+                Ok(resp) => {
+                    ws.event_handler.on_data(WsDataEvent::new(resp)).await;
+                    continue;
+                }
             }
         }
 
         let connect_result = ws.connect().await;
 
         match connect_result {
-            Err(_) => tokio::time::sleep(ws.connect_timeout).await,
-            Ok(_) => {
-                ws.subscribe_or_unsubscribe(&channels, true).await.unwrap()
-            },
+            Err(err) => {
+                ws.event_handler.on_error(err);
+                tokio::time::sleep(ws.connect_timeout).await
+            }
+            Ok(_) => ws.subscribe_or_unsubscribe(&channels, true).await.unwrap(),
         }
     }
 }

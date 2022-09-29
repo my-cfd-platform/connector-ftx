@@ -22,6 +22,7 @@ hmac-sha256 = "1.1.4"
 thiserror = "1"
 crc32fast = "^1.2.1"
 hex = "^0.4.3"
+async-trait = "*"
 
 [features]
 default = ["ws"]

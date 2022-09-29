@@ -10,8 +10,9 @@ impl OrderBookHandler {
     }
 }
 
+#[async_trait::async_trait]
 impl EventHandler for OrderBookHandler {
-    fn on_data(&self, event: WsDataEvent) {
+    async fn on_data(&self, event: WsDataEvent) {
         if let WsResponseData::OrderbookData(orderbook_data) = event.data {
             println!("Recieved orderbook {}:", event.market.unwrap());
             println!("{:?}", orderbook_data);

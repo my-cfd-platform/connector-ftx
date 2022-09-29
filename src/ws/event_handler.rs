@@ -1,7 +1,24 @@
-use super::models::*;
+use super::{models::*, WsError};
 
+#[async_trait::async_trait]
 pub trait EventHandler {
-    fn on_data(&self, event: WsDataEvent);
+    async fn on_data(&self, event: WsDataEvent);
+
+    fn on_connect(&self) {
+        println!("Connected to ws");
+    }
+
+    fn on_auth(&self) {
+        println!("Authentificated to ws");
+    }
+
+    fn on_subscribed(&self, channel: &str, market: &str) {
+        println!("Subscribed to {} {}", channel, market);
+    }
+
+    fn on_error(&self, message: WsError) {
+        println!("Error on ws {}", message);
+    }
 }
 
 pub struct WsDataEvent {
