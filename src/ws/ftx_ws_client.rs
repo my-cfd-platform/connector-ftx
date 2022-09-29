@@ -1,3 +1,4 @@
+use futures::stream::{SplitSink, SplitStream};
 use futures::{SinkExt, StreamExt};
 use serde_json::json;
 use std::sync::Arc;
@@ -13,7 +14,8 @@ use super::event_handler::*;
 use super::models::*;
 
 pub struct FtxWsClient {
-    stream: Option<WebSocketStream<MaybeTlsStream<TcpStream>>>,
+    read_stream: Option<SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>>,
+    write_stream: Option<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>>,
     ping_timer: Interval,
     event_handler: Arc<dyn EventHandler + Send + Sync + 'static>,
     auth_settings: Option<FtxAuthSettings>,
@@ -29,7 +31,8 @@ impl FtxWsClient {
         auth_settings: Option<FtxAuthSettings>,
     ) -> Self {
         Self {
-            stream: None,
+            read_stream: None,
+            write_stream: None,
             ping_timer: time::interval(Duration::from_secs(15)),
             is_authenticated: false,
             event_handler,
@@ -40,13 +43,15 @@ impl FtxWsClient {
 
     async fn connect(&mut self) -> Result<(), WsError> {
         let (stream, _) = connect_async(FtxWsClient::ENDPOINT).await?;
-        self.stream = Some(stream);
+        let (write, read) = stream.split();
+
+        self.read_stream = Some(read);
+        self.write_stream = Some(write);
 
         if let Some(_) = self.auth_settings {
             self.authenticate().await?;
             self.is_authenticated = true;
         }
-
 
         self.event_handler.on_connect();
 
@@ -54,10 +59,7 @@ impl FtxWsClient {
     }
 
     fn is_connected(&self) -> bool {
-        match self.stream {
-            Some(_) => true,
-            None => false,
-        }
+        return self.read_stream.is_some() & self.write_stream.is_some();
     }
 
     async fn authenticate(&mut self) -> Result<(), WsError> {
@@ -65,7 +67,7 @@ impl FtxWsClient {
         let auth_settings = self.auth_settings.as_ref().unwrap();
         let sign = auth_settings.generate_sign("websocket_login", timestamp);
 
-        self.stream
+        self.write_stream
             .as_mut()
             .unwrap()
             .send(Message::Text(
@@ -88,7 +90,7 @@ impl FtxWsClient {
     }
 
     async fn ping(&mut self) -> Result<(), WsError> {
-        self.stream
+        self.write_stream
             .as_mut()
             .unwrap()
             .send(Message::Text(
@@ -122,7 +124,7 @@ impl FtxWsClient {
                 WsChannel::Orders => ("orders", ""),
             };
 
-            self.stream
+            self.write_stream
                 .as_mut()
                 .unwrap()
                 .send(Message::Text(
@@ -166,7 +168,7 @@ impl FtxWsClient {
 
     async fn next_response(&mut self) -> Result<WsResponse, WsError> {
         loop {
-            if let None = self.stream {
+            if let None = self.read_stream {
                 return Err(WsError::Disconnected);
             }
 
@@ -174,16 +176,20 @@ impl FtxWsClient {
                 _ = self.ping_timer.tick() => {
                     self.ping().await?;
                 },
-                Some(msg) = self.stream.as_mut().unwrap().next() => {
+                Some(msg) = self.read_stream.as_mut().unwrap().next() => {
                     let msg = msg?;
                     if let Message::Text(text) = msg {
                         let response: WsResponse = serde_json::from_str(&text)?;
 
-                        if let WsResponse { r#type: WsMessageType::Pong, .. } = response {
-                            continue;
+                        match response.r#type {
+                            WsMessageType::Subscribed => continue,
+                            WsMessageType::Unsubscribed => continue,
+                            WsMessageType::Pong => continue,
+                            WsMessageType::Info => continue,
+                            WsMessageType::Error => return Err(WsError::Disconnected),
+                            WsMessageType::Partial => return Ok(response),
+                            WsMessageType::Update => return Ok(response),
                         }
-
-                        return Ok(response)
                     }
                 },
             }
