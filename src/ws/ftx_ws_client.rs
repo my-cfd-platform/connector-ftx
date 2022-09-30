@@ -1,26 +1,19 @@
-use futures::stream::{SplitSink, SplitStream};
-use futures::{SinkExt, StreamExt};
+use rust_extensions::Logger;
 use serde_json::json;
 use std::sync::Arc;
-use std::time::Duration;
-use tokio::time::Interval;
-use tokio::{net::TcpStream, time};
-use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
-use crate::{ftx_auth_settings::FtxAuthSettings, ws::WsMessageType};
+use tokio_tungstenite::tungstenite::Message;
 
-use super::error::*;
+use crate::ws_client::{WebSocketClient, WsCallback, WsClientSettings, WsConnection};
+use crate::{ws::WsMessageType};
+
 use super::event_handler::*;
 use super::models::*;
 
 pub struct FtxWsClient {
-    read_stream: Option<SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>>,
-    write_stream: Option<SplitSink<WebSocketStream<MaybeTlsStream<TcpStream>>, Message>>,
-    ping_timer: Interval,
     event_handler: Arc<dyn EventHandler + Send + Sync + 'static>,
-    auth_settings: Option<FtxAuthSettings>,
-    is_authenticated: bool,
-    connect_timeout: Duration,
+    ws_client: WebSocketClient,
+    channels: Vec<WsChannel>,
 }
 
 impl FtxWsClient {
@@ -28,106 +21,36 @@ impl FtxWsClient {
 
     pub fn new(
         event_handler: Arc<dyn EventHandler + Send + Sync + 'static>,
-        auth_settings: Option<FtxAuthSettings>,
+        logger: Arc<dyn Logger + Send + Sync + 'static>,
+        settings: Arc<dyn WsClientSettings + Send + Sync + 'static>,
+        channels: Vec<WsChannel>,
     ) -> Self {
         Self {
-            read_stream: None,
-            write_stream: None,
-            ping_timer: time::interval(Duration::from_secs(15)),
-            is_authenticated: false,
             event_handler,
-            auth_settings,
-            connect_timeout: Duration::from_secs(15),
+            ws_client: WebSocketClient::new("FTX".to_string(), settings, logger.clone()),
+            channels,
         }
     }
 
-    async fn connect(&mut self) -> Result<(), WsError> {
-        let (stream, _) = connect_async(FtxWsClient::ENDPOINT).await?;
-        let (write, read) = stream.split();
-
-        self.read_stream = Some(read);
-        self.write_stream = Some(write);
-
-        if let Some(_) = self.auth_settings {
-            self.authenticate().await?;
-            self.is_authenticated = true;
-        }
-
-        self.event_handler.on_connect();
-
-        Ok(())
-    }
-
-    fn is_connected(&self) -> bool {
-        return self.read_stream.is_some() & self.write_stream.is_some();
-    }
-
-    async fn authenticate(&mut self) -> Result<(), WsError> {
-        let timestamp = FtxAuthSettings::generate_timestamp();
-        let auth_settings = self.auth_settings.as_ref().unwrap();
-        let sign = auth_settings.generate_sign("websocket_login", timestamp);
-
-        self.write_stream
-            .as_mut()
-            .unwrap()
-            .send(Message::Text(
-                json!({
-                    "op": "login",
-                    "args": {
-                        "key": auth_settings.api_key,
-                        "sign": sign,
-                        "time": timestamp as u64,
-                        "subaccount": auth_settings.subaccount,
-                    }
-                })
-                .to_string(),
-            ))
-            .await?;
-
-        self.event_handler.on_auth();
-
-        Ok(())
-    }
-
-    async fn ping(&mut self) -> Result<(), WsError> {
-        self.write_stream
-            .as_mut()
-            .unwrap()
-            .send(Message::Text(
-                json!({
-                    "op": "ping",
-                })
-                .to_string(),
-            ))
-            .await?;
-
-        Ok(())
-    }
-
-    async fn subscribe_or_unsubscribe(
-        &mut self,
-        channels: &[WsChannel],
-        subscribe: bool,
-    ) -> Result<(), WsError> {
+    async fn subscribe_or_unsubscribe(&self, ws_connection: Arc<WsConnection>, subscribe: bool) {
         let op = if subscribe {
             "subscribe"
         } else {
             "unsubscribe"
         };
+        let channels = self.channels.clone();
 
-        'channels: for channel in channels {
+        for channel in channels {
             let (channel, symbol) = match channel {
-                WsChannel::Orderbook(symbol) => ("orderbook", symbol.as_str()),
-                WsChannel::Trades(symbol) => ("trades", symbol.as_str()),
-                WsChannel::Ticker(symbol) => ("ticker", symbol.as_str()),
-                WsChannel::Fills => ("fills", ""),
-                WsChannel::Orders => ("orders", ""),
+                WsChannel::Orderbook(symbol) => ("orderbook", symbol),
+                WsChannel::Trades(symbol) => ("trades", symbol),
+                WsChannel::Ticker(symbol) => ("ticker", symbol),
+                WsChannel::Fills => ("fills", "".to_string()),
+                WsChannel::Orders => ("orders", "".to_string()),
             };
 
-            self.write_stream
-                .as_mut()
-                .unwrap()
-                .send(Message::Text(
+            ws_connection
+                .send_message(Message::Text(
                     json!({
                         "op": op,
                         "channel": channel,
@@ -135,94 +58,45 @@ impl FtxWsClient {
                     })
                     .to_string(),
                 ))
-                .await?;
-
-            // Confirmation should arrive within the next 100 updates
-            for _ in 0..100 {
-                let response = self.next_response().await?;
-                match response {
-                    WsResponse {
-                        r#type: WsMessageType::Subscribed,
-                        ..
-                    } if subscribe => {
-                        self.event_handler.on_subscribed(channel, symbol);
-                        continue 'channels;
-                    }
-                    WsResponse {
-                        r#type: WsMessageType::Unsubscribed,
-                        ..
-                    } if !subscribe => {
-                        continue 'channels;
-                    }
-                    _ => {
-                        self.event_handler.on_data(WsDataEvent::new(response)).await;
-                    }
-                }
-            }
-
-            return Err(WsError::MissingSubscriptionConfirmation);
-        }
-
-        Ok(())
-    }
-
-    async fn next_response(&mut self) -> Result<WsResponse, WsError> {
-        loop {
-            if let None = self.read_stream {
-                return Err(WsError::Disconnected);
-            }
-
-            tokio::select! {
-                _ = self.ping_timer.tick() => {
-                    self.ping().await?;
-                },
-                Some(msg) = self.read_stream.as_mut().unwrap().next() => {
-                    let msg = msg?;
-                    if let Message::Text(text) = msg {
-                        let response: WsResponse = serde_json::from_str(&text)?;
-
-                        match response.r#type {
-                            WsMessageType::Subscribed => continue,
-                            WsMessageType::Unsubscribed => continue,
-                            WsMessageType::Pong => continue,
-                            WsMessageType::Info => continue,
-                            WsMessageType::Error => return Err(WsError::Disconnected),
-                            WsMessageType::Partial => return Ok(response),
-                            WsMessageType::Update => return Ok(response),
-                        }
-                    }
-                },
-            }
+                .await;
         }
     }
 
-    pub fn start(self, channels: Vec<WsChannel>) {
-        tokio::spawn(event_loop(self, channels));
+    pub fn start(ftx_ws_client: Arc<FtxWsClient>) {
+        let ping_message = Message::Text(
+            json!({
+                "op": "ping",
+            })
+            .to_string(),
+        );
+        ftx_ws_client
+            .ws_client
+            .start(ping_message, ftx_ws_client.clone());
     }
 }
 
-async fn event_loop(mut ws: FtxWsClient, channels: Vec<WsChannel>) {
-    loop {
-        if ws.is_connected() {
-            let resp = ws.next_response().await;
+#[async_trait::async_trait]
+impl WsCallback for FtxWsClient {
+    async fn on_connected(&self, ws_connection: Arc<WsConnection>) {
+        self.subscribe_or_unsubscribe(ws_connection, true).await;
+    }
 
-            match resp {
-                Err(err) => ws.event_handler.on_error(err),
-                Ok(resp) => {
-                    ws.event_handler.on_data(WsDataEvent::new(resp)).await;
-                    continue;
+    async fn on_disconnected(&self, _: Arc<WsConnection>) {}
+
+    async fn on_data(&self, _: Arc<WsConnection>, data: Message) {
+        if let Message::Text(text) = data {
+            let response: WsResponse = serde_json::from_str(&text).unwrap();
+
+            match response.r#type {
+                WsMessageType::Subscribed
+                | WsMessageType::Unsubscribed
+                | WsMessageType::Pong
+                | WsMessageType::Info
+                | WsMessageType::Error => return,
+                WsMessageType::Partial | WsMessageType::Update => {
+                    self.event_handler.on_data(WsDataEvent::new(response)).await
                 }
             }
-        }
-
-        let connect_result = ws.connect().await;
-
-        match connect_result {
-            Err(err) => {
-                ws.event_handler.on_error(err);
-                tokio::time::sleep(ws.connect_timeout).await
-            }
-            Ok(_) => ws.subscribe_or_unsubscribe(&channels, true).await.unwrap(),
         }
     }
 }

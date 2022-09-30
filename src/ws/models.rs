@@ -7,9 +7,9 @@ use serde_with::{serde_as, TimestampSecondsWithFrac};
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum WsChannel {
-    Orderbook(Symbol),
-    Trades(Symbol),
-    Ticker(Symbol),
+    Orderbook(String),
+    Trades(String),
+    Ticker(String),
     Fills,
     Orders,
 }
@@ -17,7 +17,7 @@ pub enum WsChannel {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WsResponse {
-    pub market: Option<Symbol>,
+    pub market: Option<String>,
     pub r#type: WsMessageType,
     pub data: Option<WsResponseData>,
 }

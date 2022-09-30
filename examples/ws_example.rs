@@ -1,6 +1,9 @@
 use std::{sync::Arc, time::Duration};
 
-use connector_ftx::ws::{EventHandler, FtxWsClient, WsChannel, WsResponseData, WsDataEvent};
+use connector_ftx::{ws::{
+    EventHandler, FtxWsClient, WsChannel, WsDataEvent, WsResponseData,
+}, ws_client::WsClientSettings};
+use rust_extensions::Logger;
 
 pub struct OrderBookHandler {}
 
@@ -21,13 +24,53 @@ impl EventHandler for OrderBookHandler {
     }
 }
 
+pub struct FtxSetting {}
+
+#[async_trait::async_trait]
+impl WsClientSettings for FtxSetting {
+    async fn get_url(&self) -> String {
+        return "wss://ftx.com/ws".to_string();
+    }
+}
+
+pub struct ConsoleLogger {}
+
+impl Logger for ConsoleLogger {
+    fn write_info(&self, _process: String, _message: String, _ctx: Option<std::collections::HashMap<String, String>>) {
+        
+    }
+
+    fn write_warning(&self, _process: String, _message: String, _ctx: Option<std::collections::HashMap<String, String>>) {
+    }
+
+    fn write_error(&self, _process: String,_messagee: String, _ctx: Option<std::collections::HashMap<String, String>>) {
+    }
+
+    fn write_fatal_error(
+        &self,
+        _process: String,
+        _message: String,
+        _ctx: Option<std::collections::HashMap<String, String>>,
+    ) {
+    }
+}
+
 #[tokio::main]
 async fn main() {
-    let ftx_ws = FtxWsClient::new(Arc::new(OrderBookHandler::new()), None);
-    ftx_ws.start(vec!(
+    let channels = vec![
         WsChannel::Orderbook("BTC/USD".to_owned()),
-        WsChannel::Orderbook("ETH/USD".to_owned())
-        ));
+        WsChannel::Orderbook("ETH/USD".to_owned()),
+    ];
+    let event_handler = Arc::new(OrderBookHandler {});
+    let ftx_ws = FtxWsClient::new(
+        event_handler,
+        Arc::new(ConsoleLogger{}),
+        Arc::new(FtxSetting {}),
+        channels,
+    );
+
+    FtxWsClient::start(Arc::new(ftx_ws));
+
 
     loop {
         tokio::time::sleep(Duration::from_secs(1)).await;
