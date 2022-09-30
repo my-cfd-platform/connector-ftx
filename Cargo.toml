@@ -24,6 +24,9 @@ crc32fast = "^1.2.1"
 hex = "^0.4.3"
 async-trait = "*"
 
+future-utils = "*"
+rust-extensions = { tag = "0.1.2", git = "https://github.com/MyJetTools/rust-extensions.git" }
+
 [features]
 default = ["ws"]
 ws = ["tokio-tungstenite", "tokio", "futures"]
