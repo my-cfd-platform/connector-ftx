@@ -14,11 +14,10 @@ pub struct FtxWsClient {
     event_handler: Arc<dyn EventHandler + Send + Sync + 'static>,
     ws_client: WebSocketClient,
     channels: Vec<WsChannel>,
+    logger: Arc<dyn Logger + Send + Sync + 'static>,
 }
 
 impl FtxWsClient {
-    pub const ENDPOINT: &'static str = "wss://ftx.com/ws";
-
     pub fn new(
         event_handler: Arc<dyn EventHandler + Send + Sync + 'static>,
         logger: Arc<dyn Logger + Send + Sync + 'static>,
@@ -29,6 +28,7 @@ impl FtxWsClient {
             event_handler,
             ws_client: WebSocketClient::new("FTX".to_string(), settings, logger.clone()),
             channels,
+            logger
         }
     }
 
@@ -85,14 +85,20 @@ impl WsCallback for FtxWsClient {
 
     async fn on_data(&self, _: Arc<WsConnection>, data: Message) {
         if let Message::Text(text) = data {
-            let response: WsResponse = serde_json::from_str(&text).unwrap();
+            let result: Result<WsResponse, _> = serde_json::from_str(&text);
+
+            if result.is_err() {
+                self.logger.write_error("FtxWsClient".to_string(), format!("Failed to parce message: {}", text), None)
+            }
+            
+            let response = result.unwrap();
 
             match response.r#type {
                 WsMessageType::Subscribed
                 | WsMessageType::Unsubscribed
                 | WsMessageType::Pong
-                | WsMessageType::Info
-                | WsMessageType::Error => return,
+                | WsMessageType::Info => return,
+                WsMessageType::Error => self.logger.write_error("FtxWsClient".to_string(), format!("Reciveved error: {:?}", response), None),
                 WsMessageType::Partial | WsMessageType::Update => {
                     self.event_handler.on_data(WsDataEvent::new(response)).await
                 }
