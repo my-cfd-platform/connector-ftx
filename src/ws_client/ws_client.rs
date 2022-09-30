@@ -1,7 +1,7 @@
 use futures::stream::SplitStream;
 use futures::StreamExt;
-use rust_extensions::{date_time::DateTimeAsMicroseconds, Logger};
-
+use rust_extensions::date_time::{DateTimeAsMicroseconds};
+use rust_extensions::Logger;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use tokio::net::TcpStream;
@@ -192,6 +192,8 @@ async fn read_loop<TWsCallback: WsCallback + Send + Sync + 'static>(
                     ws_connection.disconnect().await;
                     break;
                 }
+
+                ws_connection.update_last_read_time(DateTimeAsMicroseconds::now());
             }
             Err(err) => {
                 println!(
