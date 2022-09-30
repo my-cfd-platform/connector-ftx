@@ -155,7 +155,7 @@ async fn read_loop<TWsCallback: WsCallback + Send + Sync + 'static>(
     logger: Arc<dyn Logger + Send + Sync + 'static>,
     log_ctx: HashMap<String, String>,
 ) {
-    loop {
+    while ws_connection.is_connected() {
         let result = tokio::time::timeout(disconnect_timeout, read_stream.next()).await;
         if result.is_err() {
             println!("read_loop. Timeout. Discoonecting... Err");
@@ -212,7 +212,7 @@ async fn ping_loop(
     disconnect_timeout: Duration,
     ping_message: Message,
 ) {
-    loop {
+    while ws_connection.is_connected() {
         tokio::time::sleep(ping_interval).await;
 
         let now = DateTimeAsMicroseconds::now();
