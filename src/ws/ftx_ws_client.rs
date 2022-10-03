@@ -126,7 +126,7 @@ impl WsCallback for FtxWsClient {
                 WsMessageType::Subscribed => {
                     self.logger.write_info(
                         "FtxWsClient".to_string(),
-                        format!("Subscribed to FTX channel {}", response.market, response.data.),
+                        format!("Subscribed to FTX channel {}", response.market.unwrap_or_default()),
                         None,
                     );
                 },
