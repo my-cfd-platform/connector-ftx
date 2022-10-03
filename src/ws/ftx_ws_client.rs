@@ -38,13 +38,17 @@ impl FtxWsClient {
         }
     }
 
-    async fn subscribe_or_unsubscribe(&self, ws_connection: Arc<WsConnection>, subscribe: bool) {
+    async fn subscribe_or_unsubscribe(
+        &self,
+        ws_connection: Arc<WsConnection>,
+        channels: Vec<WsChannel>,
+        subscribe: bool,
+    ) {
         let op = if subscribe {
             "subscribe"
         } else {
             "unsubscribe"
         };
-        let channels = self.channels.clone();
 
         for channel in channels {
             let (channel, symbol) = match channel {
@@ -92,7 +96,14 @@ impl FtxWsClient {
 #[async_trait::async_trait]
 impl WsCallback for FtxWsClient {
     async fn on_connected(&self, ws_connection: Arc<WsConnection>) {
-        self.subscribe_or_unsubscribe(ws_connection, true).await;
+        self.logger.write_info(
+            "FtxWsClient".to_string(),
+            "Connected to FTX websocket".to_string(),
+            None,
+        );
+
+        self.subscribe_or_unsubscribe(ws_connection, self.channels.clone(), true)
+            .await; 
     }
 
     async fn on_disconnected(&self, _: Arc<WsConnection>) {}
@@ -112,14 +123,20 @@ impl WsCallback for FtxWsClient {
             let response = result.unwrap();
 
             match response.r#type {
-                WsMessageType::Subscribed
-                | WsMessageType::Unsubscribed
+                WsMessageType::Subscribed => {
+                    self.logger.write_info(
+                        "FtxWsClient".to_string(),
+                        format!("Subscribed to FTX channel {}", response.market, response.data.),
+                        None,
+                    );
+                },
+                WsMessageType::Unsubscribed
                 | WsMessageType::Pong
                 | WsMessageType::Info => return,
                 WsMessageType::Error => {
                     self.logger.write_error(
                         "FtxWsClient".to_string(),
-                        format!("Disconnecting... Recived error: {:?}", response),
+                        format!("Disconnecting... Recieved error: {:?}", response),
                         None,
                     );
                     connection.disconnect().await;
