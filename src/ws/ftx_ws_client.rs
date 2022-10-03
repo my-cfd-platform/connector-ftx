@@ -3,12 +3,12 @@ use my_web_socket_client::WsCallback;
 use my_web_socket_client::WsConnection;
 use rust_extensions::Logger;
 use serde_json::json;
-use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 use tokio_tungstenite::tungstenite::Message;
 
-use crate::{ws::WsMessageType};
+use crate::ws::WsMessageType;
 
 use super::event_handler::*;
 use super::ftx_ws_settings::FtxWsSetting;
@@ -69,7 +69,10 @@ impl FtxWsClient {
     }
 
     pub fn start(ftx_ws_client: Arc<FtxWsClient>) {
-        if !ftx_ws_client.is_started.load(std::sync::atomic::Ordering::Relaxed) {
+        if !ftx_ws_client
+            .is_started
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
             let ping_message = Message::Text(
                 json!({
                     "op": "ping",
@@ -79,9 +82,10 @@ impl FtxWsClient {
             ftx_ws_client
                 .ws_client
                 .start(ping_message, ftx_ws_client.clone());
-            ftx_ws_client.is_started.store(true, std::sync::atomic::Ordering::SeqCst);
+            ftx_ws_client
+                .is_started
+                .store(true, std::sync::atomic::Ordering::SeqCst);
         }
-        
     }
 }
 
@@ -93,14 +97,18 @@ impl WsCallback for FtxWsClient {
 
     async fn on_disconnected(&self, _: Arc<WsConnection>) {}
 
-    async fn on_data(&self, _: Arc<WsConnection>, data: Message) {
+    async fn on_data(&self, connection: Arc<WsConnection>, data: Message) {
         if let Message::Text(text) = data {
             let result: Result<WsResponse, _> = serde_json::from_str(&text);
 
             if result.is_err() {
-                self.logger.write_error("FtxWsClient".to_string(), format!("Failed to parce message: {}", text), None)
+                self.logger.write_error(
+                    "FtxWsClient".to_string(),
+                    format!("Failed to parce message: {}", text),
+                    None,
+                )
             }
-            
+
             let response = result.unwrap();
 
             match response.r#type {
@@ -108,7 +116,14 @@ impl WsCallback for FtxWsClient {
                 | WsMessageType::Unsubscribed
                 | WsMessageType::Pong
                 | WsMessageType::Info => return,
-                WsMessageType::Error => self.logger.write_error("FtxWsClient".to_string(), format!("Reciveved error: {:?}", response), None),
+                WsMessageType::Error => {
+                    self.logger.write_error(
+                        "FtxWsClient".to_string(),
+                        format!("Reciveved error: {:?}", response),
+                        None,
+                    );
+                    connection.disconnect().await;
+                }
                 WsMessageType::Partial | WsMessageType::Update => {
                     self.event_handler.on_data(WsDataEvent::new(response)).await
                 }
