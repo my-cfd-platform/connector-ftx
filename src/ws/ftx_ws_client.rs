@@ -34,7 +34,7 @@ impl FtxWsClient {
             ws_client: WebSocketClient::new("FTX".to_string(), settings, logger.clone()),
             channels,
             logger,
-            is_started: AtomicBool::new(true)
+            is_started: AtomicBool::new(false)
         }
     }
 
