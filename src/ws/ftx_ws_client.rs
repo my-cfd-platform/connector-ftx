@@ -119,7 +119,7 @@ impl WsCallback for FtxWsClient {
                 WsMessageType::Error => {
                     self.logger.write_error(
                         "FtxWsClient".to_string(),
-                        format!("Reciveved error: {:?}", response),
+                        format!("Disconnecting... Recived error: {:?}", response),
                         None,
                     );
                     connection.disconnect().await;
