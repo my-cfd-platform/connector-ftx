@@ -1,8 +1,9 @@
 use std::{sync::Arc, time::Duration};
 
-use connector_ftx::{ws::{
-    EventHandler, FtxWsClient, WsChannel, WsDataEvent, WsResponseData,
-}, ws_client::WsClientSettings};
+use connector_ftx::ws::{
+    EventHandler, FtxWsClient, WsChannel, WsDataEvent, WsResponseData
+};
+use my_web_socket_client::WsClientSettings;
 use rust_extensions::Logger;
 
 pub struct OrderBookHandler {}

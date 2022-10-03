@@ -1,10 +1,13 @@
+use my_web_socket_client::WebSocketClient;
+use my_web_socket_client::WsCallback;
+use my_web_socket_client::WsClientSettings;
+use my_web_socket_client::WsConnection;
 use rust_extensions::Logger;
 use serde_json::json;
 use std::sync::Arc;
 
 use tokio_tungstenite::tungstenite::Message;
 
-use crate::ws_client::{WebSocketClient, WsCallback, WsClientSettings, WsConnection};
 use crate::{ws::WsMessageType};
 
 use super::event_handler::*;
