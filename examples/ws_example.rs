@@ -3,7 +3,6 @@ use std::{sync::Arc, time::Duration};
 use connector_ftx::ws::{
     EventHandler, FtxWsClient, WsChannel, WsDataEvent, WsResponseData
 };
-use my_web_socket_client::WsClientSettings;
 use rust_extensions::Logger;
 
 pub struct OrderBookHandler {}
@@ -22,15 +21,6 @@ impl EventHandler for OrderBookHandler {
             println!("{:?}", orderbook_data);
             println!("-------------------------------");
         }
-    }
-}
-
-pub struct FtxSetting {}
-
-#[async_trait::async_trait]
-impl WsClientSettings for FtxSetting {
-    async fn get_url(&self) -> String {
-        return "wss://ftx.com/ws".to_string();
     }
 }
 
@@ -66,7 +56,6 @@ async fn main() {
     let ftx_ws = FtxWsClient::new(
         event_handler,
         Arc::new(ConsoleLogger{}),
-        Arc::new(FtxSetting {}),
         channels,
     );
 

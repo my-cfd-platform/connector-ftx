@@ -1,6 +1,5 @@
 use my_web_socket_client::WebSocketClient;
 use my_web_socket_client::WsCallback;
-use my_web_socket_client::WsClientSettings;
 use my_web_socket_client::WsConnection;
 use rust_extensions::Logger;
 use serde_json::json;
@@ -12,6 +11,7 @@ use tokio_tungstenite::tungstenite::Message;
 use crate::{ws::WsMessageType};
 
 use super::event_handler::*;
+use super::ftx_ws_settings::FtxWsSetting;
 use super::models::*;
 
 pub struct FtxWsClient {
@@ -26,15 +26,15 @@ impl FtxWsClient {
     pub fn new(
         event_handler: Arc<dyn EventHandler + Send + Sync + 'static>,
         logger: Arc<dyn Logger + Send + Sync + 'static>,
-        settings: Arc<dyn WsClientSettings + Send + Sync + 'static>,
         channels: Vec<WsChannel>,
     ) -> Self {
+        let settings = Arc::new(FtxWsSetting::new());
         Self {
             event_handler,
             ws_client: WebSocketClient::new("FTX".to_string(), settings, logger.clone()),
             channels,
             logger,
-            is_started: AtomicBool::new(false)
+            is_started: AtomicBool::new(false),
         }
     }
 
