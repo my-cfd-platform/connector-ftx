@@ -5,6 +5,7 @@ use my_web_socket_client::WsConnection;
 use rust_extensions::Logger;
 use serde_json::json;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
 use tokio_tungstenite::tungstenite::Message;
 
@@ -18,6 +19,7 @@ pub struct FtxWsClient {
     ws_client: WebSocketClient,
     channels: Vec<WsChannel>,
     logger: Arc<dyn Logger + Send + Sync + 'static>,
+    is_started: AtomicBool,
 }
 
 impl FtxWsClient {
@@ -31,7 +33,8 @@ impl FtxWsClient {
             event_handler,
             ws_client: WebSocketClient::new("FTX".to_string(), settings, logger.clone()),
             channels,
-            logger
+            logger,
+            is_started: AtomicBool::new(true)
         }
     }
 
@@ -66,15 +69,19 @@ impl FtxWsClient {
     }
 
     pub fn start(ftx_ws_client: Arc<FtxWsClient>) {
-        let ping_message = Message::Text(
-            json!({
-                "op": "ping",
-            })
-            .to_string(),
-        );
-        ftx_ws_client
-            .ws_client
-            .start(ping_message, ftx_ws_client.clone());
+        if !ftx_ws_client.is_started.load(std::sync::atomic::Ordering::Relaxed) {
+            let ping_message = Message::Text(
+                json!({
+                    "op": "ping",
+                })
+                .to_string(),
+            );
+            ftx_ws_client
+                .ws_client
+                .start(ping_message, ftx_ws_client.clone());
+            ftx_ws_client.is_started.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+        
     }
 }
 
