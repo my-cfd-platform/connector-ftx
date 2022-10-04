@@ -1,5 +1,4 @@
 use chrono::{DateTime, Utc};
-use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
 pub type Id = u64;
@@ -89,21 +88,21 @@ pub enum MarketType {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Position {
-    pub cost: Decimal,
-    pub entry_price: Option<Decimal>,
-    pub estimated_liquidation_price: Option<Decimal>,
+    pub cost: f64,
+    pub entry_price: Option<f64>,
+    pub estimated_liquidation_price: Option<f64>,
     pub future: String,
-    pub initial_margin_requirement: Decimal,
-    pub long_order_size: Decimal,
-    pub maintenance_margin_requirement: Decimal,
-    pub net_size: Decimal,
-    pub open_size: Decimal,
-    pub realized_pnl: Decimal,
-    pub short_order_size: Decimal,
+    pub initial_margin_requirement: f64,
+    pub long_order_size: f64,
+    pub maintenance_margin_requirement: f64,
+    pub net_size: f64,
+    pub open_size: f64,
+    pub realized_pnl: f64,
+    pub short_order_size: f64,
     pub side: Side,
-    pub size: Decimal,
-    pub unrealized_pnl: Decimal,
-    pub collateral_used: Decimal,
+    pub size: f64,
+    pub unrealized_pnl: f64,
+    pub collateral_used: f64,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -114,21 +113,21 @@ pub struct OrderInfo {
     pub future: Option<String>,
     pub r#type: OrderType,
     pub side: Side,
-    pub price: Option<Decimal>, // null for new market orders
-    pub size: Decimal,
+    pub price: Option<f64>, // null for new market orders
+    pub size: f64,
     pub reduce_only: Option<bool>,
     pub ioc: Option<bool>,
     pub post_only: Option<bool>,
     pub status: OrderStatus,
-    pub filled_size: Option<Decimal>,
-    pub remaining_size: Option<Decimal>,
-    pub avg_fill_price: Option<Decimal>,
+    pub filled_size: Option<f64>,
+    pub remaining_size: Option<f64>,
+    pub avg_fill_price: Option<f64>,
     pub liquidation: Option<bool>,
     pub created_at: DateTime<Utc>,
     pub client_id: Option<String>,
     pub retry_until_filled: Option<bool>,
-    pub trigger_price: Option<Decimal>,
-    pub order_price: Option<Decimal>,
+    pub trigger_price: Option<f64>,
+    pub order_price: Option<f64>,
     pub triggered_at: Option<String>,
     pub error: Option<String>,
 }
@@ -138,8 +137,8 @@ pub struct OrderInfo {
 pub struct TradeInfo {
     pub id: Id,
     pub liquidation: bool,
-    pub price: Decimal,
+    pub price: f64,
     pub side: Side,
-    pub size: Decimal,
+    pub size: f64,
     pub time: DateTime<Utc>,
 }

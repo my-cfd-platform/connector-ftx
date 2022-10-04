@@ -1,6 +1,5 @@
 pub use crate::common::{Coin, Id, MarketType, OrderInfo, Side, Symbol, TradeInfo};
 use chrono::{DateTime, Utc};
-use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use serde_with::{serde_as, TimestampSecondsWithFrac};
 
@@ -51,11 +50,11 @@ pub enum WsResponseData {
 #[derive(Copy, Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TickerInfo {
-    pub bid: Decimal,
-    pub ask: Decimal,
-    pub bid_size: Decimal,
-    pub ask_size: Decimal,
-    pub last: Decimal,
+    pub bid: f64,
+    pub ask: f64,
+    pub bid_size: f64,
+    pub ask_size: f64,
+    pub last: f64,
     #[serde_as(as = "TimestampSecondsWithFrac<f64>")]
     pub time: DateTime<Utc>,
 }
@@ -70,13 +69,13 @@ pub struct FillInfo {
     pub quote_currency: Option<Coin>,
     pub r#type: String, // e.g. "order"
     pub side: Side,
-    pub price: Decimal,
-    pub size: Decimal,
+    pub price: f64,
+    pub size: f64,
     pub order_id: Option<Id>,
     pub trade_id: Option<Id>,
     pub time: DateTime<Utc>,
-    pub fee: Decimal,
-    pub fee_rate: Decimal,
+    pub fee: f64,
+    pub fee_rate: f64,
     pub fee_currency: Coin,
     pub liquidity: Liquidity,
 }
@@ -88,8 +87,8 @@ pub struct FillInfo {
 #[serde(rename_all = "camelCase")]
 pub struct OrderbookInfo {
     pub action: WsOrderbookAction,
-    pub bids: Vec<(Decimal, Decimal)>,
-    pub asks: Vec<(Decimal, Decimal)>,
+    pub bids: Vec<(f64, f64)>,
+    pub asks: Vec<(f64, f64)>,
     pub checksum: Checksum,
     #[serde_as(as = "TimestampSecondsWithFrac<f64>")]
     pub time: DateTime<Utc>, // API returns 1621740952.5079553
