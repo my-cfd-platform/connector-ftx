@@ -117,7 +117,9 @@ impl WsCallback for FtxWsClient {
                     "FtxWsClient".to_string(),
                     format!("Failed to parce message: {}", text),
                     None,
-                )
+                );
+                connection.disconnect().await;
+                return;
             }
 
             let response = result.unwrap();
